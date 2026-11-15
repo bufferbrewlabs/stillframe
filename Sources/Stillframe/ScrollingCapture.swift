@@ -111,12 +111,7 @@ final class ScrollingCapture: ObservableObject {
                         return
                     }
                 }
-                let process = Process(); process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-                process.arguments = ["-x", "-R\(Int(region.minX)),\(Int(region.minY)),\(Int(region.width)),\(Int(region.height))", file.path]
-                let status: Int32 = try await withCheckedThrowingContinuation { continuation in
-                    process.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
-                    do { try process.run() } catch { continuation.resume(throwing: error) }
-                }
+                let status = try await ScreenCaptureTool.run(ScreenCaptureTool.regionCaptureArguments(region, output: file))
                 guard status == 0, let image = NSImage(data: try Data(contentsOf: file)) else { throw StitchError.invalidImage }
                 if let previous = result {
                     let pixels = ImageRenderer.bitmap(image)?.pixelsHigh ?? 0

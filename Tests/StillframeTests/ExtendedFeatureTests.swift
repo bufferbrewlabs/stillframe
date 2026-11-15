@@ -141,6 +141,20 @@ final class ExtendedFeatureTests: XCTestCase {
         input.markAsFinished(); await writer.finishWriting()
         XCTAssertEqual(writer.status, .completed)
     }
+    func testGIFExportRejectsUnsupportedSettingsWithoutCreatingFiles() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let source = folder.appendingPathComponent("source.mp4"), gif = folder.appendingPathComponent("clip.gif")
+        try await makeVideo(at: source)
+        for (fps, size) in [(7, 480), (10, 100), (15, 2000)] {
+            do {
+                try await VideoExporter.export(source: source, destination: gif, clip: VideoClip(start: 0, end: 1), gif: true, fps: fps, maxSize: size)
+                XCTFail("Accepted \(fps) fps at \(size)px")
+            } catch { XCTAssertEqual(error as? MediaExportError, .invalidGIFSettings) }
+        }
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path), ["source.mp4"])
+    }
     func testRealMP4TrimAndGIFExportPreserveOriginalAndReplaceDestination() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

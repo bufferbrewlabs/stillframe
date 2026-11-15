@@ -34,6 +34,7 @@ final class CaptureStore: ObservableObject {
     init(root: URL? = nil, pasteboard: NSPasteboard = .general) {
         self.pasteboard = pasteboard
         self.root = root ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Stillframe", isDirectory: true)
+        var problems: [String] = []
         do {
             try FileManager.default.createDirectory(at: self.root, withIntermediateDirectories: true)
             let settings = self.root.appendingPathComponent("preferences.json")
@@ -42,13 +43,19 @@ final class CaptureStore: ObservableObject {
                 preferences.migrateShortcuts()
                 delay = preferences.captureDelay; systemAudio = preferences.recordSystemAudio
             }
-        } catch { self.error = "Could not load settings; using defaults: \(error.localizedDescription)" }
-        do {
-            let manifest = self.root.appendingPathComponent("history.json")
-            if FileManager.default.fileExists(atPath: manifest.path) {
-                items = try JSONDecoder().decode([CaptureItem].self, from: Data(contentsOf: manifest))
+        } catch { problems.append("Could not load settings; using defaults: \(error.localizedDescription)") }
+        let manifest = self.root.appendingPathComponent("history.json")
+        if FileManager.default.fileExists(atPath: manifest.path) {
+            do { items = try JSONDecoder().decode([CaptureItem].self, from: Data(contentsOf: manifest)) }
+            catch {
+                // The next save would overwrite the unreadable manifest, so keep it aside for recovery.
+                let backup = self.root.appendingPathComponent("history.corrupt-\(UUID().uuidString).json")
+                let kept = (try? FileManager.default.moveItem(at: manifest, to: backup)) != nil
+                problems.append("Could not load capture history: \(error.localizedDescription)"
+                    + (kept ? " The unreadable file was kept as \(backup.lastPathComponent)." : ""))
             }
-        } catch { self.error = "Could not load capture history: \(error.localizedDescription)" }
+        }
+        if !problems.isEmpty { self.error = problems.joined(separator: "\n\n") }
     }
 
     var selected: CaptureItem? { items.first { $0.id == selectedID } }
@@ -67,7 +74,12 @@ final class CaptureStore: ObservableObject {
         // Existing annotations/redactions become pixels; a decorative backdrop is excluded.
         return NSImage(data: data)
     }
-    func url(for item: CaptureItem) -> URL { root.appendingPathComponent(item.filename) }
+    /// Library files always live directly inside `root`, even if history.json was edited by hand.
+    func url(for item: CaptureItem) -> URL { root.appendingPathComponent(Self.libraryFilename(item.filename)) }
+    nonisolated static func libraryFilename(_ name: String) -> String {
+        let last = (name as NSString).lastPathComponent
+        return ["", ".", "..", "/"].contains(last) ? ".stillframe-invalid-filename" : last
+    }
     func makeURL(extension ext: String) -> URL { root.appendingPathComponent("\(UUID().uuidString).\(ext)") }
 
     func select(_ id: UUID?) {
@@ -109,7 +121,7 @@ final class CaptureStore: ObservableObject {
         }
         _ = add(image: image, title: "Pasted image")
     }
-    func capture(_ mode: String) {
+    func capture(_ mode: CaptureMode) {
         guard !isCapturing else { return }
         isCapturing = true
         Task {
@@ -121,7 +133,7 @@ final class CaptureStore: ObservableObject {
             NSApp.hide(nil)
             try? await Task.sleep(for: .milliseconds(350 + delay * 1000))
             var capturedRect: CGRect?
-            if mode == "area" {
+            if mode == .area {
                 capturedRect = await withCheckedContinuation { continuation in
                     let picker = RegionPicker(); regionPicker = picker
                     picker.choose { rect in continuation.resume(returning: rect) }
@@ -130,31 +142,18 @@ final class CaptureStore: ObservableObject {
                 guard capturedRect != nil else { isCapturing = false; onShow?(); return }
                 NSApp.hide(nil)
                 try? await Task.sleep(for: .milliseconds(150))
-            } else if mode == "screen" { capturedRect = CGDisplayBounds(CGMainDisplayID()) }
+            } else if mode == .screen { capturedRect = CGDisplayBounds(CGMainDisplayID()) }
             let file = makeURL(extension: "png")
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-            var args = ["-x", "-t", "png"]
-            if mode == "area", let rect = capturedRect { args.append("-R\(Int(rect.minX)),\(Int(rect.minY)),\(Int(rect.width)),\(Int(rect.height))") }
-            else if mode == "window" { args += ["-i", "-w"] }
-            else { args += ["-m"] }
-            if mode == "screen", preferences.includeCursor { args.append("-C") }
-            if mode == "window", !preferences.windowShadow { args.append("-o") }
-            args.append(file.path)
-            process.arguments = args
-            let diagnostics = Pipe(); process.standardError = diagnostics
+            let args = ScreenCaptureTool.arguments(mode: mode, region: capturedRect, includeCursor: preferences.includeCursor, windowShadow: preferences.windowShadow, output: file)
             do {
-                let code: Int32 = try await withCheckedThrowingContinuation { continuation in
-                    process.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
-                    do { try process.run() } catch { continuation.resume(throwing: error) }
-                }
+                let code = try await ScreenCaptureTool.run(args)
                 if let result = NSImage(contentsOf: file) {
-                    let item = CaptureItem(title: mode == "window" ? "Window capture" : mode == "area" ? "Area capture" : "Fullscreen capture", filename: file.lastPathComponent, backdropSettings: preferences.backdrop, captureRect: capturedRect)
+                    let item = CaptureItem(title: mode.itemTitle, filename: file.lastPathComponent, backdropSettings: preferences.backdrop, captureRect: capturedRect)
                     items.insert(item, at: 0); select(item.id); image = result; persist()
                     NSApp.unhide(nil); didCapture()
                 } else {
                     try? FileManager.default.removeItem(at: file)
-                    if code != 0 && mode == "screen" { error = "Screen capture failed. Check Stillframe’s Screen Recording permission in System Settings." }
+                    if code != 0 && mode == .screen { error = "Screen capture failed. Check Stillframe’s Screen Recording permission in System Settings." }
                     onShow?()
                 }
             } catch { self.error = error.localizedDescription; onShow?() }
@@ -216,7 +215,9 @@ final class CaptureStore: ObservableObject {
         guard panel.runModal() == .OK, let target = panel.url else { return }
         do {
             if selected.kind == "video" {
-                if target.standardizedFileURL == url(for: selected).standardizedFileURL { return }
+                if target.standardizedFileURL.resolvingSymlinksInPath() == url(for: selected).standardizedFileURL.resolvingSymlinksInPath() {
+                    error = MediaExportError.overwriteSource.errorDescription; return
+                }
                 // Data.write(.atomic) supports replacing an existing file selected in NSSavePanel.
                 try Data(contentsOf: url(for: selected), options: .mappedIfSafe).write(to: target, options: .atomic)
             } else {
@@ -246,8 +247,12 @@ final class CaptureStore: ObservableObject {
     }
     func removeSelected() {
         guard let selected else { return }
-        do { try FileManager.default.removeItem(at: url(for: selected)) }
-        catch { self.error = error.localizedDescription; return }
+        let file = url(for: selected)
+        // A file already removed outside Stillframe must not leave an undeletable library entry.
+        if FileManager.default.fileExists(atPath: file.path) {
+            do { try FileManager.default.removeItem(at: file) }
+            catch { self.error = error.localizedDescription; return }
+        }
         items.removeAll { $0.id == selected.id }; select(items.first?.id); persist()
     }
     func savePreferences(_ value: AppPreferences) throws {
@@ -265,7 +270,8 @@ final class CaptureStore: ObservableObject {
         if preferences.openEditorAfterCapture { onShow?() } else { onCapture?() }
     }
     func rename(_ title: String) {
-        guard let index = items.firstIndex(where: { $0.id == selectedID }), !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        items[index].title = title; persist()
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let index = items.firstIndex(where: { $0.id == selectedID }), !trimmed.isEmpty else { return }
+        items[index].title = trimmed; persist()
     }
 }

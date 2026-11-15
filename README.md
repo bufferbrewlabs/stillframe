@@ -62,6 +62,8 @@ The first capture or recording requires **System Settings → Privacy & Security
 
 `~/Library/Application Support/Stillframe/history.json` stores capture metadata and editable annotations. PNG/MP4 files are alongside it. Files are local and unencrypted. The original screenshot remains available for editing: **redaction removes source pixels in flattened copies/exports, but does not erase the original from your capture library.** Delete the capture to remove its library source. Cropping replaces the library image; the current session can undo it. Undo history is not persisted between launches. `preferences.json` stores settings, including global shortcut bindings and default background assets. Existing capture history remains compatible with 0.1.0.
 
+If `history.json` cannot be read, Stillframe reports the problem and moves the file aside as `history.corrupt-<id>.json` in the same folder before saving anything new, so the original metadata is never overwritten. Library entries always refer to files directly inside this folder.
+
 ## Scope
 
 This is a working independent implementation of the core local capture workflow, not full CleanShot parity. Webcam/microphone recording, horizontal stitching, Studio Mode/zoom editing, and cloud hosting/collaboration are not implemented. Recording currently targets the main display; area screenshots use Stillframe’s region picker and window screenshots use the macOS window picker.
@@ -72,7 +74,31 @@ This is a working independent implementation of the core local capture workflow,
 ./test.sh
 ```
 
-Tests cover unconditional PNG clipboard publication even with an old opt-out setting, shortcut migration/function keys/punctuation, extension redaction/region retention, flattened redaction, crop orientation/bounds, annotations, history, settings recovery and persistence, per-capture backgrounds, legacy metadata, shortcut validation, three-frame scroll stitching, real MP4 trimming and GIF decoding, destination replacement, source preservation, invalid ranges and export cancellation. Run the full suite from a regular macOS terminal session. The clipboard and video export integration tests require access to the system pasteboard and H.264 encoder. Live screen capture and recording require macOS permissions.
+Extra arguments are passed to `swift test`, for example `./test.sh --filter RegressionTests` or `./test.sh --enable-code-coverage`.
+
+The suite (`Tests/StillframeTests`) covers the non-interactive core:
+
+- **Editing and rendering:** opaque redaction, crop orientation and bounds, all annotation tools, backdrop padding and clamping, per-capture backgrounds, undo/redo across crop and background changes.
+- **Library:** history persistence and relaunch, rename, search and filtering, delete (including entries whose file was already removed), corrupt settings or history recovery without data loss, and confinement of library files to the library folder.
+- **Clipboard:** every completed capture publishes PNG data, even with a legacy opt-out setting.
+- **Shortcuts:** validation, labels, migration of older three-shortcut settings, function keys, punctuation and menu key equivalents.
+- **Scrolling capture:** three-frame stitching, duplicate, mismatched, too-small and ambiguous (repeating) frames, and manual overlap.
+- **Capture and recording configuration:** `screencapture` arguments for each mode and recording size/frame-rate limits.
+- **Video export:** real MP4 trimming and GIF encoding, invalid ranges and GIF settings, destination replacement, source preservation and cancellation.
+
+Live screen capture, recording, global hotkeys and the SwiftUI/AppKit views need macOS permissions and user interaction, so they are not covered by automated tests; check them manually after changing those areas. The clipboard and video tests need the system pasteboard and the H.264 encoder, so run the suite from a logged-in macOS session.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on pushes to `main`, pull requests and manual dispatch, on a GitHub-hosted `macos-15` runner. It runs the test suite with compiler warnings treated as errors, publishes a line-coverage table to the job summary, and builds, verifies and lints the release `Stillframe.app` bundle. Documentation-only changes are skipped, superseded runs are cancelled, and the workflow uses a read-only token with a commit-pinned checkout action. Hosted runners are free for public repositories; on a private repository, macOS minutes count against the plan's Actions quota.
+
+## Troubleshooting
+
+- **Capture or recording produces nothing:** enable Stillframe under **Privacy & Security → Screen & System Audio Recording**, then quit and reopen it. Each ad-hoc rebuild may need the permission again.
+- **Scroll & Capture does not scroll:** grant **Privacy & Security → Accessibility**, or scroll yourself and choose **Add Current Frame**.
+- **"No reliable overlap" or "ambiguous" while stitching:** scroll a shorter distance, exclude sticky headers, or set the overlap manually.
+- **A global shortcut does not register:** another app or macOS owns it; choose a different combination in Settings.
+- **Settings or history could not be loaded:** Stillframe starts with defaults; an unreadable history file is kept as `history.corrupt-<id>.json` for manual recovery.
 
 ## Credits
 

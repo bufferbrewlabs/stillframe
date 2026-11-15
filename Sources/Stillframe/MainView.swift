@@ -35,7 +35,7 @@ struct MainView: View {
         .frame(minWidth: 800, minHeight: 560)
         .alert("Stillframe needs your attention", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
             Button("OK", role: .cancel) { store.error = nil }
-            Button("Open Privacy Settings") { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!) }
+            Button("Open Privacy Settings") { NSWorkspace.shared.open(AppLinks.screenRecordingPrivacy) }
         } message: { Text(store.error ?? "") }
         .alert("Delete this capture?", isPresented: $confirmDelete) {
             Button("Delete", role: .destructive) { store.removeSelected() }
@@ -46,7 +46,7 @@ struct MainView: View {
             Button("Rename") { store.rename(newTitle) }
             Button("Cancel", role: .cancel) { }
         }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("StillframeSettings"))) { _ in showSettings = true }
+        .onReceive(NotificationCenter.default.publisher(for: .stillframeShowSettings)) { _ in showSettings = true }
         .sheet(isPresented: $showSettings) {
             SettingsView(draft: store.preferences, apply: applyPreferences)
                 .onAppear { settingsPresentation(true) }
@@ -78,9 +78,9 @@ struct MainView: View {
         HStack(spacing: Layout.gap * 2) {
             Label("Stillframe", systemImage: "viewfinder").font(.title3.bold())
             Divider().frame(height: 24)
-            Button { store.capture("area") } label: { Label("Area", systemImage: "selection.pin.in.out") }.help("Capture an area · " + shortcut(1))
-            Button { store.capture("window") } label: { Label("Window", systemImage: "macwindow") }
-            Button { store.capture("screen") } label: { Label("Screen", systemImage: "display") }.help("Capture main display · " + shortcut(2))
+            Button { store.capture(.area) } label: { Label("Area", systemImage: "selection.pin.in.out") }.help("Capture an area · " + shortcut(1))
+            Button { store.capture(.window) } label: { Label("Window", systemImage: "macwindow") }
+            Button { store.capture(.screen) } label: { Label("Screen", systemImage: "display") }.help("Capture main display · " + shortcut(2))
             Button(action: startScrolling) { Label("Scroll", systemImage: "scroll") }.help("Join a scrolling region into one image")
             Menu {
                 Picker("Capture delay", selection: $store.delay) {
@@ -176,7 +176,7 @@ struct MainView: View {
                     Text("Capture a moment. Make your point. Send it on.").foregroundStyle(.secondary)
                 }
                 HStack(spacing: 12) {
-                    Button("Capture an area") { store.capture("area") }.buttonStyle(.borderedProminent)
+                    Button("Capture an area") { store.capture(.area) }.buttonStyle(.borderedProminent)
                     Button("Import an image…", action: store.importImage).buttonStyle(.bordered)
                 }
                 Text(shortcut(1) + " to capture from anywhere").font(.caption).foregroundStyle(.secondary)

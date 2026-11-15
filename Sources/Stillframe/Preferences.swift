@@ -25,6 +25,8 @@ struct ShortcutBinding: Codable, Equatable, Identifiable {
     var key: String { Self.keys.first { $0.1 == keyCode }?.0 ?? "?" }
     var menuKey: String {
         let special: [UInt32: UInt32] = [49: 32, 36: 13, 48: 9, 51: 8, 117: 0xF728, 53: 27, 123: 0xF702, 124: 0xF703, 125: 0xF701, 126: 0xF700, 115: 0xF729, 119: 0xF72B, 116: 0xF72C, 121: 0xF72D]
+        // An unknown key code (e.g. from a hand-edited preferences file) must not become a "?" menu shortcut.
+        guard Self.keys.contains(where: { $0.1 == keyCode }) else { return "" }
         if let value = special[keyCode], let scalar = UnicodeScalar(value) { return String(scalar) }
         if key.count == 1 { return key.lowercased() }
         if key.hasPrefix("F"), let number = Int(key.dropFirst()), (1...20).contains(number), let scalar = UnicodeScalar(UInt32(0xF703 + number)) { return String(scalar) }
