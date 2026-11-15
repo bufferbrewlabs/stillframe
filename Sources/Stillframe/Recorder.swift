@@ -24,11 +24,10 @@ final class Recorder: NSObject, ObservableObject, SCRecordingOutputDelegate, SCS
             let excluded = content.applications.filter { $0.processID == ProcessInfo.processInfo.processIdentifier }
             let filter = SCContentFilter(display: display, excludingApplications: excluded, exceptingWindows: [])
             let config = SCStreamConfiguration()
-            // Even dimensions, within H.264 limits; preserves the display aspect ratio.
-            let scale = min(1, Double(maxWidth) / Double(display.width), Double(maxWidth) * 9 / 16 / Double(display.height))
-            config.width = max(2, Int(Double(display.width) * scale) / 2 * 2)
-            config.height = max(2, Int(Double(display.height) * scale) / 2 * 2)
-            config.minimumFrameInterval = CMTime(value: 1, timescale: Int32([15, 30, 60].contains(fps) ? fps : 30))
+            let size = Self.outputSize(displayWidth: display.width, displayHeight: display.height, maxWidth: maxWidth)
+            config.width = size.width
+            config.height = size.height
+            config.minimumFrameInterval = CMTime(value: 1, timescale: Self.frameRate(fps))
             config.showsCursor = true
             config.capturesAudio = systemAudio
             config.excludesCurrentProcessAudio = true
@@ -84,6 +83,15 @@ final class Recorder: NSObject, ObservableObject, SCRecordingOutputDelegate, SCS
             self.reset(); self.onError?(error.localizedDescription)
         }
     }
+    /// Even dimensions within the 16:9 box of `maxWidth` (H.264 limits), preserving the display aspect ratio.
+    nonisolated static func outputSize(displayWidth: Int, displayHeight: Int, maxWidth: Int) -> (width: Int, height: Int) {
+        guard displayWidth > 0, displayHeight > 0, maxWidth > 0 else { return (2, 2) }
+        let scale = min(1, Double(maxWidth) / Double(displayWidth), Double(maxWidth) * 9 / 16 / Double(displayHeight))
+        return (max(2, Int(Double(displayWidth) * scale) / 2 * 2), max(2, Int(Double(displayHeight) * scale) / 2 * 2))
+    }
+    /// Only the frame rates offered in Settings are honoured; anything else falls back to 30 fps.
+    nonisolated static func frameRate(_ fps: Int) -> Int32 { Int32([15, 30, 60].contains(fps) ? fps : 30) }
+
     private func reset() {
         stream = nil; output = nil; destination = nil
         isRecording = false; isBusy = false; startedAt = nil

@@ -49,7 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 if id == 5 { self.scrolling.finish(); return }
                 guard !self.store.isCapturing else { return }
                 if id == 3 { self.toggleRecording() }
-                else if !self.recorder.isRecording { self.store.capture(id == 1 ? "area" : "screen") }
+                else if !self.recorder.isRecording { self.store.capture(id == 1 ? .area : .screen) }
             }
         }
         if !hotKeys.register(store.preferences.shortcuts) { store.notice = "A global shortcut is in use. Capture buttons and the menu bar are available." }
@@ -66,9 +66,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.unhide(nil); NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
-    @objc func area() { if !recorder.isRecording && !recorder.isBusy { store.capture("area") } }
-    @objc func screen() { if !recorder.isRecording && !recorder.isBusy { store.capture("screen") } }
-    @objc func captureWindow() { if !recorder.isRecording && !recorder.isBusy { store.capture("window") } }
+    @objc func area() { if !recorder.isRecording && !recorder.isBusy { store.capture(.area) } }
+    @objc func screen() { if !recorder.isRecording && !recorder.isBusy { store.capture(.screen) } }
+    @objc func captureWindow() { if !recorder.isRecording && !recorder.isBusy { store.capture(.window) } }
     @objc func toggleRecording() {
         Task {
             guard !recorder.isBusy, !store.isCapturing else { return }
@@ -76,7 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             else { await recorder.start(to: store.makeURL(extension: "mp4"), systemAudio: store.systemAudio, fps: store.preferences.recordingFPS, maxWidth: store.preferences.recordingMaxWidth) }
         }
     }
-    @objc func showSettings() { showWindow(); NotificationCenter.default.post(name: Notification.Name("StillframeSettings"), object: nil) }
+    @objc func showSettings() { showWindow(); NotificationCenter.default.post(name: .stillframeShowSettings, object: nil) }
     @objc func startScrolling() {
         guard !recorder.isRecording, !recorder.isBusy, !store.isCapturing else { return }
         store.isCapturing = true; window.orderOut(nil); overlay?.orderOut(nil)
@@ -120,7 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func exportImage() { store.export() }
     @objc func undoEdit() { store.undo() }
     @objc func redoEdit() { store.redo() }
-    @objc func openPrivacy() { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!) }
+    @objc func openPrivacy() { NSWorkspace.shared.open(AppLinks.screenRecordingPrivacy) }
     @objc func quit() {
         if recorder.isRecording {
             Task { await recorder.stop() }
