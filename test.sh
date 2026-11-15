@@ -7,4 +7,4 @@ fi
 mkdir -p .build/cache .build/module-cache
 export CLANG_MODULE_CACHE_PATH="$PWD/.build/module-cache"
 export SWIFT_MODULECACHE_PATH="$PWD/.build/module-cache"
-swift test --disable-sandbox --cache-path "$PWD/.build/cache" -Xswiftc -module-cache-path -Xswiftc "$PWD/.build/module-cache"
+swift test --disable-sandbox --cache-path "$PWD/.build/cache" -Xswiftc -module-cache-path -Xswiftc "$PWD/.build/module-cache" "$@"

@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+    paths-ignore: ["**.md", "docs/**", "LICENSE"]
+  pull_request:
+    paths-ignore: ["**.md", "docs/**", "LICENSE"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test (macOS 15)
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Test with coverage
+        run: ./test.sh --enable-code-coverage
+
+      - name: Coverage report
+        if: success()
+        run: |
+          BIN_DIR="$(swift build --show-bin-path)"
+          XCTEST="$(find "$BIN_DIR" -maxdepth 1 -name '*PackageTests.xctest' | head -n 1)"
+          xcrun llvm-cov report "$XCTEST/Contents/MacOS/$(basename "$XCTEST" .xctest)" \
+            -instr-profile "$BIN_DIR/codecov/default.profdata" \
+            -ignore-filename-regex '(Tests|\.build)/' | tee coverage.txt
+          {
+            echo '### Line coverage (Sources/)'
+            echo '```'
+            cat coverage.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Release build and app bundle
+        run: |
+          ./build.sh
+          codesign --verify --verbose Stillframe.app
+          plutil -lint Stillframe.app/Contents/Info.plist
